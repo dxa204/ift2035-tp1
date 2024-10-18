@@ -1,0 +1,19 @@
+;;; Quelques tests                     -*- mode: lisp-data; coding: utf-8 -*-
+
+;; Test 1
+(+ 3 5)                                  ; ↝ 8
+
+;; Test 2 (let)
+(let ((x 4)) (* x 3))                    ; ↝ 12
+
+;; Test 3 (if)
+(if (< 2 5) 42 99)                       ; ↝ 42
+
+;; Test 4 (fermeture)
+((fob (x) (+ x 10)) 5)                   ; ↝ 15
+
+;; Test 5 (fonction recursive)
+(fix (((factorial n) 
+         (if (= n 0) 1 
+             (* n (factorial (- n 1)))))) 
+  (factorial 4))                         ; ↝ 24
