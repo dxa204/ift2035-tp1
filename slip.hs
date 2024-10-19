@@ -207,7 +207,11 @@ s2l (Snode (Ssym "let") (Snode (Ssym "list") [(Snode (Ssym var) [expr])] : body 
 
 -- Pour les appels de fonctions recursives
 s2l (Snode (Ssym "fix") (Snode (Ssym "list") binds : body : _)) = 
-  Lfix (map (\(Snode (Ssym v)  [e]) -> (v, s2l e)) binds) (s2l body)
+  Lfix (map (\x -> case x of
+    (Snode (Ssym v) [e]) -> (v, s2l e)
+    _ -> error "Unexpected pattern in let binding") binds) (s2l body)
+
+
 s2l (Snode f args) = Lsend (s2l f) (map s2l args)
 s2l se = error ("Expression Psil inconnue: " ++ showSexp se)
 
@@ -269,12 +273,14 @@ eval env (Ltest c t e) = case eval env c of
 eval env (Lfob args body) = Vfob env args body
 eval env (Lsend f args) = case eval env f of
   Vfob fenv fargs fbody -> eval (zip fargs (map (eval env) args) ++ fenv) fbody
-  Vbuiltin f -> f (map (eval env) args)
-  _ -> error "Appel non-fonctionnel" ++ show f
+  Vbuiltin func -> func (map (eval env) args)
+  _ -> error "Appel non-fonctionnel"
 eval env (Llet x e body) = eval ((x, eval env e) : env) body
 -- Pour les fonctions récursives
-eval env (Lfix binds body) = let env' = env ++ [(v, Vfob env' e) | (v, e) <- binds]
-                             in eval env' body
+eval env (Lfix binds body) = 
+    let vars = map fst binds
+        env' = env ++ [(v, Vfob env' vars e) | (v, e) <- binds]
+    in eval env' body
                   
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
