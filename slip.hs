@@ -1,4 +1,4 @@
--- Derin Akay 20234040, Joe El-Hayek 20210061
+-- Derin Akay, Joe El-Hayek
 
 -- TP-1  --- Implantation d'une sorte de Lisp          -*- coding: utf-8 -*-
 {-# OPTIONS_GHC -Wall #-}
@@ -190,29 +190,34 @@ data Lexp = Lnum Int             -- Constante entière.
           | Lfix [(Var, Lexp)] Lexp
           deriving (Show, Eq)
 
+s2list :: Sexp -> [Sexp]
+s2list Snil = []
+s2list (Snode se1 ses) = se1 : ses
+s2list se = error ("Pas une liste: " ++ showSexp se)
+
+svar2lvar :: Sexp -> Var
+svar2lvar (Ssym v) = v
+svar2lvar se = error ("Pas un symbole: " ++ showSexp se)
+
 -- Première passe simple qui analyse une Sexp et construit une Lexp équivalente.
 s2l :: Sexp -> Lexp
--- Pour les nombers
 s2l (Snum n) = Lnum n
--- Pour les symboles
 s2l (Ssym s) = Lvar s
--- Pour les listes
-s2l (Snode (Ssym "if") [c, t, e]) = Ltest (s2l c) (s2l t) (s2l e)
-s2l (Snode (Ssym "lambda") (Snode (Ssym "list") args : body : _)) = 
-  Lfob (map s2lSym args) (s2l body)
-  where s2lSym (Ssym s) = s
-        s2lSym _ = error "Lambda inconnu"
-s2l (Snode (Ssym "let") (Snode (Ssym "list") [(Snode (Ssym var) [expr])] : body : _)) = 
-  Llet var (s2l expr) (s2l body)
-
--- Pour les appels de fonctions recursives
-s2l (Snode (Ssym "fix") (Snode (Ssym "list") binds : body : _)) = 
-  Lfix (map (\x -> case x of
-    (Snode (Ssym v) [e]) -> (v, s2l e)
-    _ -> error "Unexpected pattern in let binding") binds) (s2l body)
-
-
-s2l (Snode f args) = Lsend (s2l f) (map s2l args)
+s2l (Snode (Ssym "if") [e1, e2, e3])
+  = Ltest (s2l e1) (s2l e2) (s2l e3)
+s2l (Snode (Ssym "fob") [args, body])
+  = Lfob (map svar2lvar (s2list args)) (s2l body)
+s2l (Snode (Ssym "let") [x, e1, e2])
+  = Llet (svar2lvar x) (s2l e1) (s2l e2)
+s2l (Snode (Ssym "fix") [decls, body])
+  = let sdecl2ldecl :: Sexp -> (Var, Lexp)
+        sdecl2ldecl (Snode (Ssym v) [e]) = (v, (s2l e))
+        sdecl2ldecl (Snode (Snode (Ssym v) args) [e])
+          = (v, Lfob (map svar2lvar args) (s2l e))
+        sdecl2ldecl se = error ("Declation Psil inconnue: " ++ showSexp se)
+    in Lfix (map sdecl2ldecl (s2list decls)) (s2l body)
+s2l (Snode f args)
+  = Lsend (s2l f) (map s2l args)
 s2l se = error ("Expression Psil inconnue: " ++ showSexp se)
 
 ---------------------------------------------------------------------------
@@ -258,30 +263,30 @@ env0 = let binop f op =
 ---------------------------------------------------------------------------
 
 eval :: VEnv -> Lexp -> Value
--- Pour les constantes
-eval _ (Lnum n) = Vnum n
--- Pour les booléens
-eval _ (Lbool b) = Vbool b
-eval env (Lvar x) = case lookup x env of
-                      Just v -> v
-                      Nothing -> error ("Variable inconnue: " ++ x)
--- Pour les conditions (if)
-eval env (Ltest c t e) = case eval env c of
-  Vbool True -> eval env t
-  Vbool False -> eval env e
-  _ -> error "Condition non booléenne"
+eval _   (Lnum n) = Vnum n
+eval _   (Lbool b) = Vbool b
+eval env (Lvar x)
+  = case lookup x env of
+      Just v -> v
+      _ -> error ("Variable inconnue: " ++ x)
+eval env (Ltest e1 e2 e3)
+  = eval env (case eval env e1 of
+               Vbool False -> e3
+               _ -> e2)
 eval env (Lfob args body) = Vfob env args body
-eval env (Lsend f args) = case eval env f of
-  Vfob fenv fargs fbody -> eval (zip fargs (map (eval env) args) ++ fenv) fbody
-  Vbuiltin func -> func (map (eval env) args)
-  _ -> error "Appel non-fonctionnel"
-eval env (Llet x e body) = eval ((x, eval env e) : env) body
--- Pour les fonctions récursives
-eval env (Lfix binds body) = 
-    let vars = map fst binds
-        env' = env ++ [(v, Vfob env' vars e) | (v, e) <- binds]
-    in eval env' body
-                  
+eval env (Lsend f actuals)
+  = let fv = eval env f
+        actualsv = map (eval env) actuals
+    in case fv of
+      Vbuiltin bi -> bi actualsv
+      Vfob env' formals body -> eval (zip formals actualsv ++ env') body
+      v -> error ("Pas une fonction: " ++ show v)
+eval env (Llet x e1 e2) = eval ((x, eval env e1) : env) e2
+eval env (Lfix decls body)
+  = let newenv = map (\(x,e) -> (x, eval newenv e)) decls ++ env
+    in eval newenv body
+
+
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
 ---------------------------------------------------------------------------
@@ -293,7 +298,7 @@ evalSexp = eval env0 . s2l
 -- l'autre, et renvoie la liste des valeurs obtenues.
 run :: FilePath -> IO ()
 run filename =
-    do inputHandle <- openFile filename ReadMode 
+    do inputHandle <- openFile filename ReadMode
        hSetEncoding inputHandle utf8
        s <- hGetContents inputHandle
        (hPutStr stdout . show)
